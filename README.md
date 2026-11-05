@@ -22,3 +22,24 @@ O Android pode impedir a abertura de apps não instalados ou ações sem suporte
 ## IA local e pesquisa técnica
 
 Consulte [docs/AI_RESEARCH.md](docs/AI_RESEARCH.md) para a pesquisa de bibliotecas Android/Kotlin, modelos GGUF, licenças e arquitetura escolhida para evoluir o JARVIS.
+
+
+## SUPERIOR IRON MODE e manutenção em segundo plano
+
+Abra **Configurações** e toque em **Ativar modo Superior**. O código local solicitado é `superior`. Esse modo ajusta o perfil de resposta para ser mais analítico e técnico; não aumenta os limites reais do modelo nem concede permissões extras ao Android.
+
+**Atenção de segurança:** como o código é verificado no próprio APK, ele pode ser extraído por alguém com conhecimento técnico. É apenas um bloqueio visual/local, não autenticação segura para dados ou operações privilegiadas. Para produção, valide o administrador em um backend.
+
+### Atualização de perfil
+Em Configurações, informe uma URL HTTPS no campo **URL HTTPS do perfil de atualização**. O Android WorkManager tentará consultar esse endereço aproximadamente a cada 24 horas quando houver rede e o sistema permitir. A execução pode ser adiada pelo Android, especialmente em economia de bateria.
+
+O endpoint deve responder JSON neste formato:
+
+```json
+{
+  "version": "1.0.1",
+  "system_prompt": "Instruções atualizadas do assistente, em português."
+}
+```
+
+O app guarda o novo perfil e o aplica às próximas conversas. Isso **não treina os pesos do modelo**, não permite autoalteração do código e não instala APKs silenciosamente. Atualizações do aplicativo continuam sendo distribuídas por novas versões assinadas.
