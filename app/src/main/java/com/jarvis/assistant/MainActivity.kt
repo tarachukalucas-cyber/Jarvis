@@ -4,345 +4,431 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
-    private lateinit var transcript: TextView
-    private lateinit var transcriptScroll: ScrollView
-    private lateinit var input: EditText
+    private lateinit var root: LinearLayout
+    private lateinit var messagesBox: LinearLayout
+    private lateinit var scroll: ScrollView
+    private lateinit var composer: EditText
+    private lateinit var statusText: TextView
     private lateinit var tts: TextToSpeech
-    private lateinit var page: LinearLayout
-    private lateinit var titleView: TextView
-    private lateinit var subtitleView: TextView
-    private var speechRecognizer: SpeechRecognizer? = null
-    private val messages = mutableListOf<String>()
+    private var recognizer: SpeechRecognizer? = null
+    private val executor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val history = JSONArray()
     private val prefs by lazy { getSharedPreferences("jarvis_settings", MODE_PRIVATE) }
-    private var accentColor = Color.rgb(0, 210, 240)
-    private var backgroundColor = Color.rgb(5, 11, 18)
     private var voiceEnabled = true
-    private var compactMode = false
-    private var historyLimit = 100
-    private var launchableApps: List<Pair<String, String>>? = null
+    private var accent = Color.rgb(67, 203, 225)
+    private var busy = false
 
-    private val audioPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) listenNow() else addLine("JARVIS", "A permissão do microfone não foi concedida.")
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) startVoice() else addMessage("JARVIS", "Preciso da permissão do microfone para ouvir seus comandos.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        loadSettings()
-        tts = TextToSpeech(this, this)
-        buildInterface()
-        addLine("JARVIS", "Olá. Sou o JARVIS. Posso conversar por texto ou voz e abrir aplicativos por comando.")
-    }
-
-    private fun loadSettings() {
-        accentColor = when (prefs.getString("theme", "cyan")) {
-            "purple" -> Color.rgb(174, 112, 255)
-            "green" -> Color.rgb(68, 220, 150)
-            "amber" -> Color.rgb(255, 185, 75)
-            else -> Color.rgb(0, 210, 240)
-        }
-        backgroundColor = if (prefs.getBoolean("dark", true)) Color.rgb(5, 11, 18) else Color.rgb(238, 244, 248)
         voiceEnabled = prefs.getBoolean("voice", true)
-        compactMode = prefs.getBoolean("compact", false)
-        historyLimit = if (prefs.getBoolean("lite", false)) 40 else 100
+        accent = when (prefs.getString("theme", "cyan")) {
+            "purple" -> Color.rgb(173, 125, 255)
+            "green" -> Color.rgb(75, 210, 150)
+            "amber" -> Color.rgb(255, 190, 90)
+            else -> Color.rgb(67, 203, 225)
+        }
+        tts = TextToSpeech(this, this)
+        buildUi()
+        addMessage("JARVIS", "Olá. Sou seu assistente. Posso conversar quando a conexão com a IA estiver configurada, abrir aplicativos, pesquisar na web e iniciar seu app de música.")
     }
 
-    private fun buildInterface() {
-        page = LinearLayout(this).apply {
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun buildUi() {
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 20, 24, 16)
+            setPadding(dp(16), dp(12), dp(16), dp(10))
+            setBackgroundColor(Color.rgb(10, 14, 22))
         }
-        titleView = TextView(this).apply {
-            text = "J A R V I S"
-            textSize = 27f
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(8), dp(4), dp(14))
+        }
+        val mark = TextView(this).apply {
+            text = "✦"
+            textSize = 30f
+            setTextColor(accent)
             gravity = Gravity.CENTER
-            setTypeface(null, android.graphics.Typeface.BOLD)
         }
-        subtitleView = TextView(this).apply {
-            text = "ASSISTENTE PESSOAL"
-            textSize = 11f
-            gravity = Gravity.CENTER
-        }
-        transcript = TextView(this).apply {
-            textSize = if (compactMode) 14f else 16f
-            setPadding(16, 16, 16, 16)
-            setTextIsSelectable(true)
-        }
-        transcriptScroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(transcript)
-        }
-        input = EditText(this).apply {
-            hint = "Digite um comando..."
-            setSingleLine(false)
-            maxLines = if (compactMode) 2 else 4
-            setPadding(14, 12, 14, 12)
-        }
-
-        val send = Button(this).apply {
-            text = "ENVIAR"
-            setOnClickListener { submitText() }
-        }
-        val mic = Button(this).apply {
-            text = "🎙 FALAR"
-            setOnClickListener {
-                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO)
-                    == PackageManager.PERMISSION_GRANTED) listenNow()
-                else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        }
-        val customize = Button(this).apply {
-            text = "PERSONALIZAR"
-            setOnClickListener { showCustomization() }
-        }
-        val optimize = Button(this).apply {
-            text = "OTIMIZAÇÃO"
-            setOnClickListener { showOptimization() }
-        }
-
-        page.addView(titleView)
-        page.addView(subtitleView)
-        page.addView(transcriptScroll, LinearLayout.LayoutParams(-1, 0, 1f).apply {
-            topMargin = 12
-            bottomMargin = 10
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        heading.addView(TextView(this).apply {
+            text = "JARVIS"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            letterSpacing = .18f
         })
-        page.addView(input, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(send, LinearLayout.LayoutParams(0, -2, 1f))
-        actions.addView(mic, LinearLayout.LayoutParams(0, -2, 1f))
-        page.addView(actions)
-        val settingsActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        settingsActions.addView(customize, LinearLayout.LayoutParams(0, -2, 1f))
-        settingsActions.addView(optimize, LinearLayout.LayoutParams(0, -2, 1f))
-        page.addView(settingsActions)
-        setContentView(page)
-        applyAppearance()
-    }
-
-    private fun applyAppearance() {
-        val dark = prefs.getBoolean("dark", true)
-        val textColor = if (dark) Color.rgb(229, 244, 247) else Color.rgb(25, 42, 52)
-        val panelColor = if (dark) Color.rgb(20, 35, 45) else Color.rgb(220, 231, 237)
-        page.setBackgroundColor(backgroundColor)
-        titleView.setTextColor(accentColor)
-        subtitleView.setTextColor(if (dark) Color.rgb(139, 170, 181) else Color.rgb(75, 100, 112))
-        transcript.setTextColor(textColor)
-        transcript.setBackgroundColor(panelColor)
-        input.setTextColor(textColor)
-        input.setHintTextColor(if (dark) Color.rgb(121, 145, 154) else Color.rgb(105, 123, 132))
-        input.setBackgroundColor(panelColor)
-        window.statusBarColor = backgroundColor
-        window.navigationBarColor = backgroundColor
-        if (android.os.Build.VERSION.SDK_INT >= 23) {
-            window.decorView.systemUiVisibility = if (dark) 0 else
-                android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        statusText = TextView(this).apply {
+            text = "ASSISTENTE PESSOAL  •  PRONTO"
+            textSize = 10f
+            setTextColor(Color.rgb(142, 163, 180))
+            letterSpacing = .08f
         }
-    }
-
-    private fun showCustomization() {
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 12, 24, 8)
+        heading.addView(statusText)
+        top.addView(mark, LinearLayout.LayoutParams(dp(42), dp(48)))
+        top.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        val settings = TextView(this).apply {
+            text = "⚙"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setOnClickListener { showSettings() }
         }
-        content.addView(TextView(this).apply { text = "Tema de cores"; textSize = 16f })
-        val themes = listOf("Ciano" to "cyan", "Roxo" to "purple", "Verde" to "green", "Âmbar" to "amber")
-        val themeGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        themes.forEach { (label, key) ->
-            themeGroup.addView(RadioButton(this).apply {
+        top.addView(settings, LinearLayout.LayoutParams(dp(44), dp(48)))
+        root.addView(top)
+
+        val line = View(this).apply { setBackgroundColor(Color.rgb(35, 48, 62)) }
+        root.addView(line, LinearLayout.LayoutParams(-1, dp(1)))
+
+        scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            setPadding(0, dp(14), 0, dp(12))
+        }
+        messagesBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(messagesBox)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val suggestions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        listOf("Abrir YouTube", "Pesquisar no Google", "Abrir música").forEach { label ->
+            val chip = TextView(this).apply {
                 text = label
-                tag = key
-                isChecked = prefs.getString("theme", "cyan") == key
-            })
-        }
-        content.addView(themeGroup)
-        val darkCheck = CheckBox(this).apply {
-            text = "Interface escura"
-            isChecked = prefs.getBoolean("dark", true)
-        }
-        val voiceCheck = CheckBox(this).apply {
-            text = "Responder usando voz"
-            isChecked = voiceEnabled
-        }
-        val compactCheck = CheckBox(this).apply {
-            text = "Interface compacta"
-            isChecked = compactMode
-        }
-        content.addView(darkCheck)
-        content.addView(voiceCheck)
-        content.addView(compactCheck)
-
-        AlertDialog.Builder(this)
-            .setTitle("Personalizar JARVIS")
-            .setView(content)
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Salvar") { _, _ ->
-                val selected = themeGroup.findViewById<RadioButton>(themeGroup.checkedRadioButtonId)
-                prefs.edit()
-                    .putString("theme", selected?.tag as? String ?: "cyan")
-                    .putBoolean("dark", darkCheck.isChecked)
-                    .putBoolean("voice", voiceCheck.isChecked)
-                    .putBoolean("compact", compactCheck.isChecked)
-                    .apply()
-                loadSettings()
-                input.maxLines = if (compactMode) 2 else 4
-                transcript.textSize = if (compactMode) 14f else 16f
-                applyAppearance()
-                addLine("JARVIS", "Preferências atualizadas.")
+                textSize = 11f
+                setTextColor(Color.rgb(194, 215, 226))
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                background = rounded(Color.rgb(25, 36, 49), dp(18))
+                setOnClickListener { runCommand(label) }
             }
-            .show()
+            val lp = LinearLayout.LayoutParams(0, -2, 1f)
+            lp.marginEnd = dp(5)
+            suggestions.addView(chip, lp)
+        }
+        root.addView(suggestions)
+        val composeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(6), dp(6), dp(6))
+            background = rounded(Color.rgb(24, 33, 46), dp(24))
+        }
+        composer = EditText(this).apply {
+            hint = "Pergunte ou dê um comando..."
+            setHintTextColor(Color.rgb(130, 148, 164))
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            minLines = 1
+            maxLines = 4
+            setPadding(dp(10), dp(8), dp(8), dp(8))
+            background = null
+        }
+        composeRow.addView(composer, LinearLayout.LayoutParams(0, -2, 1f))
+        val mic = TextView(this).apply {
+            text = "🎙"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setOnClickListener {
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startVoice()
+                else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        composeRow.addView(mic, LinearLayout.LayoutParams(dp(42), dp(44)))
+        val send = TextView(this).apply {
+            text = "➤"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(5, 15, 22))
+            background = rounded(accent, dp(18))
+            setOnClickListener { sendTyped() }
+        }
+        composeRow.addView(send, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val composerLp = LinearLayout.LayoutParams(-1, -2)
+        composerLp.topMargin = dp(10)
+        root.addView(composeRow, composerLp)
+        setContentView(root)
     }
 
-    private fun showOptimization() {
-        val liteCheck = CheckBox(this).apply {
-            text = "Ativar modo leve (histórico menor e interface compacta)"
-            isChecked = prefs.getBoolean("lite", false)
+    private fun rounded(color: Int, radius: Int): android.graphics.drawable.GradientDrawable =
+        android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius = radius.toFloat() }
+
+    private fun addMessage(who: String, text: String) {
+        val isUser = who == "Você"
+        val bubble = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = rounded(if (isUser) Color.rgb(32, 72, 91) else Color.rgb(25, 34, 47), dp(18))
         }
-        AlertDialog.Builder(this)
-            .setTitle("Otimização")
-            .setMessage("O modo leve limita o histórico mantido na tela para reduzir o trabalho da interface. Ele não altera nem promete liberar a memória do Android.")
-            .setView(liteCheck)
-            .setNegativeButton("Fechar", null)
-            .setNeutralButton("Limpar conversa") { _, _ ->
-                messages.clear()
-                renderMessages()
-                addLine("JARVIS", "Conversa limpa.")
-            }
-            .setPositiveButton("Aplicar") { _, _ ->
-                prefs.edit().putBoolean("lite", liteCheck.isChecked).apply()
-                historyLimit = if (liteCheck.isChecked) 40 else 100
-                if (liteCheck.isChecked) {
-                    compactMode = true
-                    prefs.edit().putBoolean("compact", true).apply()
-                    input.maxLines = 2
-                    transcript.textSize = 14f
-                }
-                while (messages.size > historyLimit) messages.removeAt(0)
-                renderMessages()
-                addLine("JARVIS", if (liteCheck.isChecked) "Modo leve ativado." else "Modo leve desativado.")
-            }
-            .show()
+        bubble.addView(TextView(this).apply {
+            this.text = who.uppercase(Locale("pt", "BR"))
+            textSize = 10f
+            setTextColor(if (isUser) Color.rgb(170, 224, 239) else accent)
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = .08f
+        })
+        bubble.addView(TextView(this).apply {
+            this.text = text
+            textSize = 15f
+            setTextColor(Color.rgb(235, 242, 248))
+            setPadding(0, dp(5), 0, 0)
+            setTextIsSelectable(true)
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = if (isUser) Gravity.END else Gravity.START
+            setPadding(0, dp(5), 0, dp(9))
+        }
+        row.addView(bubble, LinearLayout.LayoutParams((resources.displayMetrics.widthPixels * .82f).toInt(), -2))
+        messagesBox.addView(row)
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
-    private fun submitText() {
-        val command = input.text.toString().trim()
-        if (command.isEmpty()) return
-        input.text.clear()
-        addLine("Você", command)
-        handleCommand(command)
+    private fun sendTyped() {
+        val value = composer.text.toString().trim()
+        if (value.isNotEmpty() && !busy) {
+            composer.text.clear()
+            runCommand(value)
+        }
     }
 
-    private fun listenNow() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            addLine("JARVIS", "O reconhecimento de voz não está disponível neste aparelho.")
+    private fun runCommand(raw: String) {
+        addMessage("Você", raw)
+        val cmd = raw.trim()
+        val lower = cmd.lowercase(Locale("pt", "BR"))
+        when {
+            lower.matches(Regex("^(abra|abrir|abre)\\s+.+")) -> {
+                val target = cmd.replaceFirst(Regex("(?i)^(abra|abrir|abre)\\s+"), "").trim()
+                addMessage("JARVIS", openTarget(target))
+            }
+            lower.startsWith("pesquise ") || lower.startsWith("pesquisar ") || lower.startsWith("procure ") || lower.startsWith("google ") -> {
+                val query = cmd.substringAfter(" ").trim()
+                openWebSearch(query)
+                addMessage("JARVIS", "Pesquisando na web: $query")
+            }
+            lower.startsWith("toque ") || lower.contains("tocar música") || lower.contains("abra música") || lower == "abrir música" -> {
+                addMessage("JARVIS", openMusic())
+            }
+            lower.startsWith("http://") || lower.startsWith("https://") || lower.matches(Regex("^[a-z0-9.-]+\\.[a-z]{2,}(/.*)?$")) -> {
+                val address = if (lower.startsWith("http")) cmd else "https://$cmd"
+                openUrl(address)
+                addMessage("JARVIS", "Abrindo $address")
+            }
+            lower == "ajuda" -> addMessage("JARVIS", "Você pode dizer: “abra Instagram”, “pesquise receitas”, “abra github.com” ou “abrir música”. Para conversar com a IA, configure o servidor nas opções.")
+            else -> askAi(cmd)
+        }
+    }
+
+    private fun openTarget(target: String): String {
+        val normalized = target.lowercase(Locale("pt", "BR")).trim()
+        if (normalized.contains(".") || normalized.startsWith("www")) {
+            val url = if (normalized.startsWith("http")) target else "https://$target"
+            openUrl(url)
+            return "Abrindo $url."
+        }
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = packageManager.queryIntentActivities(launcher, PackageManager.MATCH_ALL)
+        val exact = apps.firstOrNull { it.loadLabel(packageManager).toString().equals(target, true) }
+        val match = exact ?: apps.firstOrNull {
+            it.loadLabel(packageManager).toString().contains(target, true) ||
+                target.contains(it.loadLabel(packageManager).toString(), true)
+        }
+        if (match != null) {
+            val launch = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+                return "Abrindo ${match.loadLabel(packageManager)}."
+            }
+        }
+        if (normalized.contains("google")) {
+            openUrl("https://www.google.com")
+            return "Abrindo o Google."
+        }
+        return "Não encontrei “$target” entre os aplicativos disponíveis. Confira se está instalado ou tente o nome exibido no celular."
+    }
+
+    private fun openMusic(): String {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MUSIC)
+        val resolve = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        if (resolve != null) {
+            startActivity(intent)
+            return "Abrindo seu aplicativo de música."
+        }
+        openUrl("https://music.youtube.com")
+        return "Não encontrei um app de música padrão. Abrindo YouTube Music no navegador."
+    }
+
+    private fun openWebSearch(query: String) {
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).putExtra("query", query)
+        try { startActivity(intent) } catch (_: Exception) { openUrl("https://www.google.com/search?q=" + Uri.encode(query)) }
+    }
+
+    private fun openUrl(value: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(value))) }
+        catch (_: Exception) { addMessage("JARVIS", "Não consegui abrir esse endereço neste aparelho.") }
+    }
+
+    private fun askAi(prompt: String) {
+        val endpoint = prefs.getString("ai_endpoint", "")?.trim().orEmpty()
+        if (endpoint.isBlank()) {
+            addMessage("JARVIS", "Ainda não estou conectado ao modelo de IA. Abra ⚙ Configurações → Conexão de IA e informe o endereço do seu servidor seguro compatível com a API de chat. A chave secreta deve ficar no servidor, nunca dentro do APK.")
             return
         }
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        if (!endpoint.startsWith("https://")) {
+            addMessage("JARVIS", "Por segurança, o endereço do servidor precisa começar com https://.")
+            return
+        }
+        busy = true
+        statusText.text = "IA CONECTANDO..."
+        addMessage("JARVIS", "Pensando…")
+        executor.execute {
+            var connection: HttpURLConnection? = null
+            try {
+                val url = if (endpoint.endsWith("/chat/completions")) endpoint else endpoint.trimEnd('/') + "/v1/chat/completions"
+                connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 45000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                val messages = JSONArray()
+                messages.put(JSONObject().put("role", "system").put("content", "Você é JARVIS, um assistente pessoal útil, claro e seguro. Responda em português do Brasil. Não afirme que executou ações que não executou."))
+                val start = maxOf(0, history.length() - 12)
+                for (i in start until history.length()) messages.put(history.getJSONObject(i))
+                messages.put(JSONObject().put("role", "user").put("content", prompt))
+                val body = JSONObject().put("model", "gpt-4o-mini").put("messages", messages).put("temperature", 0.7)
+                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val responseText = stream.bufferedReader().use { it.readText() }
+                if (code !in 200..299) throw IllegalStateException("Servidor respondeu HTTP $code.")
+                val answer = JSONObject(responseText).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+                history.put(JSONObject().put("role", "user").put("content", prompt))
+                history.put(JSONObject().put("role", "assistant").put("content", answer))
+                mainHandler.post {
+                    removeThinking()
+                    addMessage("JARVIS", answer)
+                    speak(answer)
+                    busy = false
+                    statusText.text = "ASSISTENTE PESSOAL  •  ONLINE"
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    removeThinking()
+                    addMessage("JARVIS", "Não consegui acessar a IA: ${e.message ?: "erro de conexão"}. Confira o endereço HTTPS e se o servidor está ativo.")
+                    busy = false
+                    statusText.text = "ASSISTENTE PESSOAL  •  OFFLINE"
+                }
+            } finally { connection?.disconnect() }
+        }
+    }
+
+    private fun removeThinking() {
+        if (messagesBox.childCount > 0) messagesBox.removeViewAt(messagesBox.childCount - 1)
+    }
+
+    private fun showSettings() {
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        panel.addView(TextView(this).apply { text = "Endereço HTTPS do servidor de IA"; textSize = 14f })
+        val endpoint = EditText(this).apply {
+            hint = "https://seu-servidor.com"
+            setSingleLine(true)
+            setText(prefs.getString("ai_endpoint", ""))
+        }
+        panel.addView(endpoint)
+        val voice = CheckBox(this).apply { text = "Respostas por voz"; isChecked = voiceEnabled }
+        panel.addView(voice)
+        panel.addView(TextView(this).apply {
+            text = "O servidor deve oferecer uma rota compatível com /v1/chat/completions e guardar a chave do provedor no próprio servidor. Não cole chaves secretas aqui."
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(8), 0, 0)
+        })
+        AlertDialog.Builder(this)
+            .setTitle("Configurações do JARVIS")
+            .setView(panel)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar") { _, _ ->
+                val value = endpoint.text.toString().trim()
+                prefs.edit().putString("ai_endpoint", value).putBoolean("voice", voice.isChecked).apply()
+                voiceEnabled = voice.isChecked
+                addMessage("JARVIS", if (value.isBlank()) "Conexão de IA não configurada." else "Endereço do servidor salvo. A conexão será testada na próxima mensagem.")
+            }.show()
+    }
+
+    private fun startVoice() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            addMessage("JARVIS", "O reconhecimento de voz não está disponível neste aparelho.")
+            return
+        }
+        recognizer?.destroy()
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Fale com o JARVIS")
         }
-        speechRecognizer?.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
+        recognizer?.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) { statusText.text = "ESTOU OUVINDO..." }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onError(error: Int) { addLine("JARVIS", "Não consegui reconhecer a fala. Tente novamente.") }
+            override fun onError(error: Int) { statusText.text = "ASSISTENTE PESSOAL  •  PRONTO"; addMessage("JARVIS", "Não consegui reconhecer. Tente novamente.") }
             override fun onResults(results: Bundle?) {
+                statusText.text = "ASSISTENTE PESSOAL  •  PRONTO"
                 val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!spoken.isNullOrBlank()) {
-                    addLine("Você", spoken)
-                    handleCommand(spoken)
-                }
+                if (!spoken.isNullOrBlank()) runCommand(spoken)
             }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        speechRecognizer?.startListening(intent)
+        recognizer?.startListening(intent)
     }
 
-    private fun handleCommand(raw: String) {
-        val command = raw.lowercase(Locale("pt", "BR")).trim()
-        val response = when {
-            command.startsWith("abra ") || command.startsWith("abrir ") || command.startsWith("abre ") -> {
-                val appName = command.substringAfter(" ").trim()
-                openApp(appName)
-            }
-            command == "ajuda" || command.contains("o que você faz") ->
-                "Posso conversar por texto ou voz, abrir aplicativos e salvar suas preferências. Experimente: abra YouTube."
-            else ->
-                "Entendi: \"$raw\". Minha conexão com uma IA generativa ainda será adicionada. Experimente: abra YouTube."
-        }
-        addLine("JARVIS", response)
-        speak(response)
-    }
-
-    private fun openApp(requested: String): String {
-        val apps = launchableApps ?: run {
-            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            launchableApps = packageManager.queryIntentActivities(launcherIntent, 0).map {
-                it.loadLabel(packageManager).toString() to it.activityInfo.packageName
-            }.distinctBy { it.second }
-            launchableApps.orEmpty()
-        }
-        val match = apps.firstOrNull { it.first.contains(requested, ignoreCase = true) }
-        if (match != null) {
-            val launch = packageManager.getLaunchIntentForPackage(match.second)
-            if (launch != null) {
-                startActivity(launch)
-                return "Abrindo ${match.first}."
-            }
-        }
-        return "Não encontrei um aplicativo chamado $requested."
-    }
-
-    private fun addLine(who: String, message: String) {
-        messages.add("$who: $message")
-        while (messages.size > historyLimit) messages.removeAt(0)
-        renderMessages()
-    }
-
-    private fun renderMessages() {
-        transcript.text = messages.joinToString("\n\n")
-        transcriptScroll.post { transcriptScroll.fullScroll(ScrollView.FOCUS_DOWN) }
-    }
-
-    private fun speak(message: String) {
-        if (::tts.isInitialized && voiceEnabled) {
-            tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
-        }
+    private fun speak(text: String) {
+        if (::tts.isInitialized && voiceEnabled) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = tts.setLanguage(Locale("pt", "BR"))
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                voiceEnabled = false
-                prefs.edit().putBoolean("voice", false).apply()
-            }
-        }
+        if (status == TextToSpeech.SUCCESS) tts.setLanguage(Locale("pt", "BR"))
     }
 
     override fun onDestroy() {
-        speechRecognizer?.destroy()
+        recognizer?.destroy()
         if (::tts.isInitialized) tts.shutdown()
+        executor.shutdownNow()
         super.onDestroy()
     }
 }
