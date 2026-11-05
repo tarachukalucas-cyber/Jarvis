@@ -45,7 +45,7 @@ class LocalAiEngine(context: Context, scope: CoroutineScope) : AutoCloseable {
         edge.models.prefetch(model)
         edge.text.prepare(model, options)
         val configuredAgent = edge.text.toolAgent(
-            tools = createTools(),
+            tools = createTools() + AndroidActionTools.create(app),
             model = model,
             memory = ConversationWindow(maxTurns = 8, maxTokens = 3072),
             systemPrompt = """
