@@ -115,6 +115,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         top.addView(settings, LinearLayout.LayoutParams(dp(44), dp(48)))
         root.addView(top)
 
+        root.addView(ReactorDisplay(), LinearLayout.LayoutParams(-1, dp(176)))
+
         val line = View(this).apply { setBackgroundColor(Color.rgb(35, 48, 62)) }
         root.addView(line, LinearLayout.LayoutParams(-1, dp(1)))
 
@@ -443,6 +445,97 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } finally {
                 busy = false
             }
+        }
+    }
+
+
+    /** Animated holographic reactor inspired by the Stark lab aesthetic. */
+    private inner class ReactorDisplay : View(this@MainActivity) {
+        private val ringPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(1.4).toFloat()
+        }
+        private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            letterSpacing = .16f
+        }
+        private val bounds = android.graphics.RectF()
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            val cx = width / 2f
+            val cy = height / 2f
+            val radius = minOf(width * .25f, height * .43f)
+            val rotation = (System.currentTimeMillis() % 12000L) / 12000f * 360f
+
+            fillPaint.color = Color.rgb(11, 22, 34)
+            canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(18).toFloat(), dp(18).toFloat(), fillPaint)
+
+            ringPaint.color = Color.argb(35, 75, 190, 220)
+            ringPaint.strokeWidth = 1f
+            for (i in 1..4) {
+                val y = height * i / 5f
+                canvas.drawLine(dp(8).toFloat(), y, width - dp(8).toFloat(), y, ringPaint)
+            }
+
+            canvas.save()
+            canvas.translate(cx, cy)
+            ringPaint.color = accent
+            ringPaint.strokeWidth = dp(1).toFloat()
+            canvas.drawCircle(0f, 0f, radius * 1.34f, ringPaint)
+            ringPaint.color = Color.argb(90, 100, 220, 245)
+            canvas.drawCircle(0f, 0f, radius * 1.16f, ringPaint)
+            ringPaint.strokeWidth = dp(3).toFloat()
+            bounds.set(-radius, -radius, radius, radius)
+            canvas.save()
+            canvas.rotate(rotation)
+            canvas.drawArc(bounds, 18f, 82f, false, ringPaint)
+            canvas.drawArc(bounds, 198f, 82f, false, ringPaint)
+            canvas.restore()
+
+            ringPaint.strokeWidth = dp(1).toFloat()
+            ringPaint.color = Color.argb(180, 70, 205, 230)
+            canvas.drawCircle(0f, 0f, radius * .78f, ringPaint)
+            canvas.save()
+            canvas.rotate(-rotation * 1.7f)
+            val inner = radius * .62f
+            bounds.set(-inner, -inner, inner, inner)
+            canvas.drawArc(bounds, 0f, 115f, false, ringPaint)
+            canvas.drawArc(bounds, 180f, 115f, false, ringPaint)
+            canvas.restore()
+
+            fillPaint.shader = android.graphics.RadialGradient(
+                0f, 0f, radius * .58f,
+                intArrayOf(Color.argb(150, 65, 205, 235), Color.argb(35, 20, 100, 145), Color.TRANSPARENT),
+                null, android.graphics.Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(0f, 0f, radius * .58f, fillPaint)
+            fillPaint.shader = null
+
+            textPaint.color = Color.WHITE
+            textPaint.textSize = dp(19).toFloat()
+            canvas.drawText("J", 0f, dp(7).toFloat(), textPaint)
+            textPaint.color = accent
+            textPaint.textSize = dp(7).toFloat()
+            canvas.drawText("ARC CORE", 0f, radius * 1.62f, textPaint)
+            canvas.restore()
+
+            textPaint.textAlign = android.graphics.Paint.Align.LEFT
+            textPaint.color = Color.rgb(120, 195, 218)
+            textPaint.textSize = dp(8).toFloat()
+            canvas.drawText("STARK INDUSTRIES  /  PERSONAL AI", dp(10).toFloat(), dp(15).toFloat(), textPaint)
+            textPaint.textAlign = android.graphics.Paint.Align.RIGHT
+            textPaint.color = Color.rgb(100, 220, 170)
+            canvas.drawText("● SYSTEM ONLINE", width - dp(10).toFloat(), dp(15).toFloat(), textPaint)
+            textPaint.textAlign = android.graphics.Paint.Align.LEFT
+            textPaint.color = Color.rgb(125, 153, 175)
+            textPaint.textSize = dp(7).toFloat()
+            canvas.drawText("NEURAL INTERFACE", dp(12).toFloat(), height - dp(12).toFloat(), textPaint)
+            textPaint.textAlign = android.graphics.Paint.Align.RIGHT
+            canvas.drawText("VOICE  •  AI  •  ANDROID", width - dp(12).toFloat(), height - dp(12).toFloat(), textPaint)
+            postInvalidateDelayed(40)
         }
     }
 
