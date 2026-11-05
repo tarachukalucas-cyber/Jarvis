@@ -26,6 +26,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var root: LinearLayout
@@ -38,6 +43,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val history = JSONArray()
+    private val aiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var localAi: LocalAiEngine? = null
     private val prefs by lazy { getSharedPreferences("jarvis_settings", MODE_PRIVATE) }
     private var voiceEnabled = true
     private var accent = Color.rgb(67, 203, 225)
@@ -58,7 +65,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         tts = TextToSpeech(this, this)
         buildUi()
-        addMessage("JARVIS", "Olá. Sou seu assistente. Posso conversar quando a conexão com a IA estiver configurada, abrir aplicativos, pesquisar na web e iniciar seu app de música.")
+        localAi = runCatching { LocalAiEngine(applicationContext, aiScope) }.getOrNull()
+        addMessage("JARVIS", "Olá. Sou seu assistente. Posso conversar com um modelo local depois do download, abrir aplicativos, pesquisar na web e iniciar seu app de música.")
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -299,9 +307,31 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun askAi(prompt: String) {
+        val local = localAi
+        if (local?.isReady == true) {
+            busy = true
+            statusText.text = "IA LOCAL PENSANDO..."
+            addMessage("JARVIS", "Pensando…")
+            aiScope.launch {
+                try {
+                    val answer = local.reply(prompt)
+                    removeThinking()
+                    addMessage("JARVIS", answer)
+                    speak(answer)
+                    statusText.text = "IA LOCAL  •  PRONTA"
+                } catch (e: Exception) {
+                    removeThinking()
+                    addMessage("JARVIS", "O modelo local encontrou um erro: ${e.message ?: "falha na geração"}.")
+                    statusText.text = "IA LOCAL  •  ERRO"
+                } finally {
+                    busy = false
+                }
+            }
+            return
+        }
         val endpoint = prefs.getString("ai_endpoint", "")?.trim().orEmpty()
         if (endpoint.isBlank()) {
-            addMessage("JARVIS", "Ainda não estou conectado ao modelo de IA. Abra ⚙ Configurações → Conexão de IA e informe o endereço do seu servidor seguro compatível com a API de chat. A chave secreta deve ficar no servidor, nunca dentro do APK.")
+            addMessage("JARVIS", "Para ativar o chat inteligente offline, abra ⚙ Configurações e toque em “Baixar IA local”. O modelo ocupa cerca de 1,3 GB e será baixado uma única vez.")
             return
         }
         if (!endpoint.startsWith("https://")) {
@@ -379,12 +409,41 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .setTitle("Configurações do JARVIS")
             .setView(panel)
             .setNegativeButton("Cancelar", null)
+            .setNeutralButton("Baixar IA local (~1,3 GB)") { _, _ -> downloadLocalAi() }
             .setPositiveButton("Salvar") { _, _ ->
                 val value = endpoint.text.toString().trim()
                 prefs.edit().putString("ai_endpoint", value).putBoolean("voice", voice.isChecked).apply()
                 voiceEnabled = voice.isChecked
-                addMessage("JARVIS", if (value.isBlank()) "Conexão de IA não configurada." else "Endereço do servidor salvo. A conexão será testada na próxima mensagem.")
+                addMessage("JARVIS", if (value.isBlank()) "Servidor remoto não configurado. O modelo local pode funcionar sem internet depois de baixado." else "Endereço do servidor salvo.")
             }.show()
+    }
+
+    private fun downloadLocalAi() {
+        val local = localAi
+        if (local == null) {
+            addMessage("JARVIS", "Não consegui iniciar o motor local de IA neste aparelho.")
+            return
+        }
+        if (local.isReady) {
+            addMessage("JARVIS", "A IA local já está instalada e pronta.")
+            return
+        }
+        if (busy) return
+        busy = true
+        statusText.text = "BAIXANDO MODELO..."
+        addMessage("JARVIS", "Iniciando download do Qwen3-1.7B. O arquivo tem aproximadamente 1,28 GB. Recomendo Wi-Fi e espaço livre suficiente. Mantenha o app aberto durante a preparação.")
+        aiScope.launch {
+            try {
+                local.downloadAndPrepare()
+                addMessage("JARVIS", "Modelo Qwen3 instalado e carregado. O chat local está pronto, e posso abrir aplicativos, sites, pesquisas e música quando você pedir.")
+                statusText.text = "IA LOCAL  •  PRONTA"
+            } catch (e: Exception) {
+                addMessage("JARVIS", "Não consegui preparar o modelo: ${e.message ?: "erro desconhecido"}. Verifique a internet, o espaço livre e tente novamente.")
+                statusText.text = "IA LOCAL  •  NÃO DISPONÍVEL"
+            } finally {
+                busy = false
+            }
+        }
     }
 
     private fun startVoice() {
@@ -429,6 +488,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         recognizer?.destroy()
         if (::tts.isInitialized) tts.shutdown()
         executor.shutdownNow()
+        runCatching { localAi?.close() }
+        aiScope.cancel()
         super.onDestroy()
     }
 }
