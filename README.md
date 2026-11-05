@@ -1,19 +1,19 @@
 # JARVIS para Android
 
-Aplicativo Android nativo em Kotlin, com interface própria, conversa por texto, reconhecimento de voz em português usando o serviço de fala disponível no Android, resposta falada por TextToSpeech e abertura de aplicativos instalados.
+Assistente Android em Kotlin com interface de chat, entrada por texto e voz, respostas faladas, comandos locais para iniciar aplicativos, abrir sites, pesquisa web e app de música.
 
-## Gerar APK
-O GitHub Actions compila automaticamente o APK de depuração a cada push na branch `main`. Também é possível executar manualmente em **Actions → Build JARVIS APK → Run workflow**.
+## Build
+O GitHub Actions compila o APK de depuração a cada push na branch main. O artefato se chama `JARVIS-debug-apk`.
 
-Quando a execução terminar com sucesso, baixe o arquivo `JARVIS-debug-apk` na seção **Artifacts** da execução.
+## Conexão com IA
+O app aceita um endpoint HTTPS de servidor compatível com OpenAI Chat Completions. Nas configurações do app, informe a URL base do seu backend; ele deve expor `/v1/chat/completions` (ou informe a URL completa dessa rota), receber `model` e `messages`, e responder com `choices[0].message.content`.
 
-## Estado atual
-Esta é uma primeira versão funcional de comandos locais, não uma IA geral. A conexão com um modelo de IA, memória persistente e ferramentas adicionais serão etapas posteriores.
+**Importante:** a chave do provedor de IA deve ficar como segredo no servidor/backend, nunca embutida no APK. O repositório não inclui servidor hospedado, chave de API ou créditos de IA; portanto, o chat inteligente só responderá depois que um backend válido for configurado.
 
-## Requisitos
-- Android 8.0 (API 26) ou superior.
-- Permissão de microfone para comandos por voz.
-- Serviço de reconhecimento de fala disponível no dispositivo.
+## Comandos locais
+- "abra [nome do app]" tenta localizar e iniciar um app instalado.
+- "pesquise [termo]" abre a pesquisa web.
+- "abra exemplo.com" abre um site.
+- "abrir música" inicia o app de música padrão ou abre YouTube Music no navegador.
 
-## Privacidade e segurança
-O aplicativo não mantém escuta contínua. O microfone é ativado somente quando a pessoa toca no botão de voz. Não há chave de API embutida no APK.
+O Android pode impedir a abertura de apps não instalados ou ações sem suporte. O microfone só é usado após a pessoa tocar no botão de voz.
