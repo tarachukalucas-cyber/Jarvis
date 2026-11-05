@@ -17,3 +17,8 @@ O app aceita um endpoint HTTPS de servidor compatível com OpenAI Chat Completio
 - "abrir música" inicia o app de música padrão ou abre YouTube Music no navegador.
 
 O Android pode impedir a abertura de apps não instalados ou ações sem suporte. O microfone só é usado após a pessoa tocar no botão de voz.
+
+
+## IA local e pesquisa técnica
+
+Consulte [docs/AI_RESEARCH.md](docs/AI_RESEARCH.md) para a pesquisa de bibliotecas Android/Kotlin, modelos GGUF, licenças e arquitetura escolhida para evoluir o JARVIS.
