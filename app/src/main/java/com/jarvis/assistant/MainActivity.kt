@@ -454,6 +454,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setText(prefs.getString("ai_endpoint", ""))
         }
         panel.addView(endpoint)
+        panel.addView(TextView(this).apply { text = "URL HTTPS do perfil de atualização (opcional)"; textSize = 14f })
+        val updateUrl = EditText(this).apply {
+            hint = "https://seu-servidor.com/jarvis/profile.json"
+            setSingleLine(true)
+            setText(prefs.getString("ai_update_url", ""))
+        }
+        panel.addView(updateUrl)
         val voice = CheckBox(this).apply { text = "Respostas por voz"; isChecked = voiceEnabled }
         panel.addView(voice)
         panel.addView(Button(this).apply {
@@ -479,7 +486,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .setNeutralButton("Baixar IA local (~1,3 GB)") { _, _ -> downloadLocalAi() }
             .setPositiveButton("Salvar") { _, _ ->
                 val value = endpoint.text.toString().trim()
-                prefs.edit().putString("ai_endpoint", value).putBoolean("voice", voice.isChecked).apply()
+                val updateValue = updateUrl.text.toString().trim()
+                prefs.edit().putString("ai_endpoint", value)
+                    .putString("ai_update_url", updateValue)
+                    .putBoolean("voice", voice.isChecked).apply()
                 voiceEnabled = voice.isChecked
                 addMessage("JARVIS", if (value.isBlank()) "Servidor remoto não configurado. O modelo local pode funcionar sem internet depois de baixado." else "Endereço do servidor salvo.")
             }.show()
