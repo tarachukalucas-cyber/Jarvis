@@ -43,3 +43,9 @@ O endpoint deve responder JSON neste formato:
 ```
 
 O app guarda o novo perfil e o aplica às próximas conversas. Isso **não treina os pesos do modelo**, não permite autoalteração do código e não instala APKs silenciosamente. Atualizações do aplicativo continuam sendo distribuídas por novas versões assinadas.
+
+## Ferramentas Android do agente local
+
+A arquitetura do agente também incorpora ideias do [OpenJarvis](https://github.com/open-jarvis/OpenJarvis): motor de inferência separado das ferramentas e memória. No Android, o agente local pode abrir as Configurações do sistema (Wi-Fi, Bluetooth, som, tela e bateria), preparar um temporizador e preencher um evento no calendário para revisão e confirmação do usuário. As ferramentas anteriores para abrir apps, sites, pesquisar e iniciar música continuam disponíveis.
+
+O Android não permite que um app comum tenha controle irrestrito e invisível sobre todos os outros aplicativos. As integrações usam telas e APIs públicas do sistema, respeitando permissões e confirmações. Veja [docs/OPENJARVIS_ANDROID_INTEGRATION.md](docs/OPENJARVIS_ANDROID_INTEGRATION.md) para arquitetura, escopo e etapas de teste.
