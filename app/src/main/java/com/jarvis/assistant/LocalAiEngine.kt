@@ -62,9 +62,20 @@ class LocalAiEngine(context: Context, scope: CoroutineScope) : AutoCloseable {
         agent = configuredAgent
     }
 
-    suspend fun reply(message: String): String {
+    suspend fun reply(message: String, recentContext: String = ""): String {
         val active = agent ?: error("O modelo local ainda não foi baixado.")
-        return active.reply(message, maxSteps = 5, maxTokens = 420).text
+        val contextualPrompt = if (recentContext.isBlank()) {
+            message
+        } else {
+            """
+            Contexto recente da conversa (use apenas para manter continuidade; não repita tudo):
+            $recentContext
+
+            Nova mensagem do usuário:
+            $message
+            """.trimIndent()
+        }
+        return active.reply(contextualPrompt, maxSteps = 5, maxTokens = 420).text
     }
 
     private fun createTools(): List<Tool> = listOf(
