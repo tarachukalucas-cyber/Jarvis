@@ -23,7 +23,7 @@ O JARVIS atual é um app Android nativo em Kotlin. Para adicionar inferência lo
 - É um modelo pequeno para execução local comparado a modelos de nuvem. A qualidade não deve ser anunciada como equivalente ao ChatGPT; a velocidade e a qualidade dependem da RAM, processador, quantização e temperatura do aparelho.
 - O modelo é um download separado e grande; não deve ser embutido no APK. O aplicativo deverá mostrar tamanho, espaço livre, progresso e opção de cancelar.
 
-Uma variante quantizada Q4 deve ser escolhida após confirmar o nome exato do arquivo disponível no repositório do modelo. Não fixar um nome de arquivo sem validar o catálogo remoto.
+O arquivo selecionado para a primeira integração é `Qwen3-1.7B-Q4_K_M.gguf` no repositório `ggml-org/Qwen3-1.7B-GGUF`, com tamanho publicado de aproximadamente 1,28 GB. O app já aponta para esse repositório e arquivo.
 
 ## Projetos analisados
 
@@ -46,6 +46,14 @@ Tem interface Material 3 Expressive, provedores de IA, memória/RAG e ferramenta
 https://github.com/dgirard/droidclaw
 
 Assistente Android baseado em Flutter com ciclo de agente, tool calling e múltiplos provedores. É útil como referência de arquitetura de agente, mas não é uma dependência direta para o app Kotlin.
+
+## Implementação iniciada no repositório JARVIS
+
+- Dependência adicionada: `io.github.aatricks:llmedge:0.3.9` (Apache-2.0), biblioteca Kotlin/Android baseada em llama.cpp.
+- Nova classe `LocalAiEngine.kt` cria uma sessão de chat local, baixa o GGUF sob demanda e registra ferramentas limitadas para abrir aplicativos instalados, URLs, pesquisas Google e app de música.
+- A interface ganhou a ação “Baixar IA local (~1,3 GB)” nas configurações.
+- O minSdk do JARVIS foi elevado para 30 por compatibilidade com a biblioteca.
+- A compilação do APK e o teste em aparelho real ainda são necessários; a integração não deve ser considerada validada até passar nesses testes.
 
 ## Arquitetura pretendida
 
