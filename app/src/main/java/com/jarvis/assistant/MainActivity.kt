@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             else -> Color.rgb(67, 203, 225)
         }
         tts = TextToSpeech(this, this)
+        restoreConversation()
         buildUi()
         localAi = runCatching { LocalAiEngine(applicationContext, aiScope) }.getOrNull()
         addMessage("JARVIS", "Olá. Sou seu assistente. Posso conversar com um modelo local depois do download, abrir aplicativos, pesquisar na web e iniciar seu app de música.")
@@ -316,7 +317,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             addMessage("JARVIS", "Pensando…")
             aiScope.launch {
                 try {
-                    val answer = local.reply(prompt)
+                    val answer = local.reply(prompt, recentContext())
+                    rememberTurn(prompt, answer)
                     removeThinking()
                     addMessage("JARVIS", answer)
                     speak(answer)
@@ -366,8 +368,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val responseText = stream.bufferedReader().use { it.readText() }
                 if (code !in 200..299) throw IllegalStateException("Servidor respondeu HTTP $code.")
                 val answer = JSONObject(responseText).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-                history.put(JSONObject().put("role", "user").put("content", prompt))
-                history.put(JSONObject().put("role", "assistant").put("content", answer))
+                rememberTurn(prompt, answer)
                 mainHandler.post {
                     removeThinking()
                     addMessage("JARVIS", answer)
@@ -384,6 +385,40 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } finally { connection?.disconnect() }
         }
+    }
+
+    private fun restoreConversation() {
+        val saved = prefs.getString("conversation_history", null) ?: return
+        runCatching {
+            val parsed = JSONArray(saved)
+            val start = maxOf(0, parsed.length() - 24)
+            for (i in start until parsed.length()) history.put(parsed.getJSONObject(i))
+        }
+    }
+
+    private fun rememberTurn(userText: String, assistantText: String) {
+        history.put(JSONObject().put("role", "user").put("content", userText))
+        history.put(JSONObject().put("role", "assistant").put("content", assistantText))
+        while (history.length() > 24) {
+            val trimmed = JSONArray()
+            for (i in 2 until history.length()) trimmed.put(history.getJSONObject(i))
+            while (history.length() > 0) history.remove(0)
+            for (i in 0 until trimmed.length()) history.put(trimmed.getJSONObject(i))
+        }
+        prefs.edit().putString("conversation_history", history.toString()).apply()
+    }
+
+    private fun recentContext(): String {
+        val start = maxOf(0, history.length() - 12)
+        if (start >= history.length()) return ""
+        val lines = mutableListOf<String>()
+        for (i in start until history.length()) {
+            val item = history.optJSONObject(i) ?: continue
+            val role = item.optString("role")
+            val content = item.optString("content")
+            if (content.isNotBlank()) lines += (if (role == "assistant") "JARVIS" else "Usuário") + ": " + content
+        }
+        return lines.joinToString("\n")
     }
 
     private fun removeThinking() {
@@ -453,7 +488,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private inner class ReactorDisplay : View(this@MainActivity) {
         private val ringPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = dp(1.4).toFloat()
+            strokeWidth = dp(1).toFloat() * 1.4f
         }
         private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
         private val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
