@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.jarvis.assistant"
-        minSdk = 26
+        minSdk = 30
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
@@ -30,4 +30,6 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("io.github.aatricks:llmedge:0.3.9")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 }
