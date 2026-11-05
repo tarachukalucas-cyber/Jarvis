@@ -20,6 +20,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -66,6 +71,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         restoreConversation()
         buildUi()
+        scheduleBackgroundMaintenance()
         localAi = runCatching { LocalAiEngine(applicationContext, aiScope) }.getOrNull()
         addMessage("JARVIS", "Olá. Sou seu assistente. Posso conversar com um modelo local depois do download, abrir aplicativos, pesquisar na web e iniciar seu app de música.")
     }
@@ -309,6 +315,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         catch (_: Exception) { addMessage("JARVIS", "Não consegui abrir esse endereço neste aparelho.") }
     }
 
+    private fun superiorInstruction(): String {
+        val remote = prefs.getString("remote_system_prompt", "")?.trim().orEmpty()
+        val superior = if (prefs.getBoolean("superior_mode", false)) {
+            " Perfil SUPERIOR IRON MODE ativado: seja mais analítico, proativo e técnico; estruture planos em etapas, verifique pressupostos, explique limitações e ofereça alternativas seguras. Não alegue capacidades inexistentes nem execute ações sem autorização. "
+        } else ""
+        return "$superior $remote"
+    }
+
+    private fun scheduleBackgroundMaintenance() {
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val request = PeriodicWorkRequestBuilder<JarvisMaintenanceWorker>(24, java.util.concurrent.TimeUnit.HOURS).setConstraints(constraints).build()
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork("jarvis-background-maintenance", ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
     private fun askAi(prompt: String) {
         val local = localAi
         if (local?.isReady == true) {
@@ -317,7 +337,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             addMessage("JARVIS", "Pensando…")
             aiScope.launch {
                 try {
-                    val answer = local.reply(prompt, recentContext())
+                    val answer = local.reply(superiorInstruction() + prompt, recentContext())
                     rememberTurn(prompt, answer)
                     removeThinking()
                     addMessage("JARVIS", answer)
@@ -357,7 +377,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     setRequestProperty("Content-Type", "application/json")
                 }
                 val messages = JSONArray()
-                messages.put(JSONObject().put("role", "system").put("content", "Você é JARVIS, um assistente pessoal útil, claro e seguro. Responda em português do Brasil. Não afirme que executou ações que não executou."))
+                messages.put(JSONObject().put("role", "system").put("content", "Você é JARVIS, um assistente pessoal útil, claro e seguro. Responda em português do Brasil. Não afirme que executou ações que não executou." + superiorInstruction()))
                 val start = maxOf(0, history.length() - 12)
                 for (i in start until history.length()) messages.put(history.getJSONObject(i))
                 messages.put(JSONObject().put("role", "user").put("content", prompt))
@@ -436,6 +456,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         panel.addView(endpoint)
         val voice = CheckBox(this).apply { text = "Respostas por voz"; isChecked = voiceEnabled }
         panel.addView(voice)
+        panel.addView(Button(this).apply {
+            text = if (prefs.getBoolean("superior_mode", false)) "Configurar modo Superior" else "Ativar modo Superior"
+            setOnClickListener { showSuperiorAccess() }
+        })
+        panel.addView(TextView(this).apply {
+            text = "A atualização em segundo plano consulta um perfil remoto quando configurado e permitido pelo Android. Ela não treina o modelo nem instala APKs sozinha."
+            textSize = 11f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(8), 0, 0)
+        })
         panel.addView(TextView(this).apply {
             text = "O servidor deve oferecer uma rota compatível com /v1/chat/completions e guardar a chave do provedor no próprio servidor. Não cole chaves secretas aqui."
             textSize = 12f
@@ -452,6 +482,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 prefs.edit().putString("ai_endpoint", value).putBoolean("voice", voice.isChecked).apply()
                 voiceEnabled = voice.isChecked
                 addMessage("JARVIS", if (value.isBlank()) "Servidor remoto não configurado. O modelo local pode funcionar sem internet depois de baixado." else "Endereço do servidor salvo.")
+            }.show()
+    }
+
+    private fun showSuperiorAccess() {
+        val input = EditText(this).apply {
+            hint = "Código de administrador"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this).setTitle("Acesso administrativo")
+            .setMessage("Informe o código para ativar o perfil Superior.")
+            .setView(input).setNegativeButton("Cancelar", null)
+            .setPositiveButton("Ativar") { _, _ ->
+                if (input.text.toString() == "superior") {
+                    prefs.edit().putBoolean("superior_mode", true).apply()
+                    addMessage("JARVIS", "Perfil SUPERIOR IRON MODE ativado. Respostas mais analíticas habilitadas; funções continuam limitadas ao que o app realmente oferece.")
+                    statusText.text = "SUPERIOR IRON MODE  •  ATIVO"
+                    speak("Modo Superior ativado. Estou à sua disposição.")
+                } else addMessage("JARVIS", "Código administrativo inválido.")
             }.show()
     }
 
